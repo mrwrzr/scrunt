@@ -101,7 +101,7 @@ if [ -f "$CONFIG_FILE" ]; then
     esac
 fi
 
-dialog --title "scrunt setup" --msgbox "Welcome to scrunt setup\n\nThis will configure your update routine with pre-update and post-update hooks." 8 50
+dialog --title "scrunt setup" --msgbox "Welcome to scrunt setup. This will configure your update routine with pre-update and post-update hooks." 8 50
 
 if command -v pacman &>/dev/null; then
     PM="pacman"
@@ -125,7 +125,7 @@ elif command -v zypper &>/dev/null; then
     PM="zypper"
     AUR=""
 else
-    dialog --title "Package Manager" --inputbox "Could not detect package manager.\nEnter manually (pacman/apt/dnf/yum/zypper):" 8 50 2>/tmp/pm
+    dialog --title "Package Manager" --inputbox "Could not detect package manager. Enter manually (pacman/apt/dnf/yum/zypper):" 8 50 2>/tmp/pm
     PM=$(cat /tmp/pm)
     AUR=""
 fi
@@ -144,13 +144,13 @@ else
     SNAP=false
 fi
 
-dialog --title "Package List Backup" --yesno "Save list of installed packages before updating?\n\n(recommended)" 7 50
+dialog --title "Package List Backup" --yesno "Save list of installed packages before updating? (recommended)" 7 50
 SAVE_PACKAGE_LIST=$([ $? -eq 0 ] && echo true || echo false)
 
-dialog --title "System Snapshots" --yesno "Create system snapshot before updating?\n\n(requires timeshift or snapper)" 7 50
+dialog --title "System Snapshots" --yesno "Create system snapshot before updating? (requires timeshift or snapper)" 7 50
 CREATE_SNAPSHOT=$([ $? -eq 0 ] && echo true || echo false)
 
-dialog --title "Update Confirmation" --yesno "Auto-run updates without asking for confirmation?\n\n(WARNING: this can create risks! please monitor which packages are being upgraded!)" 7 50
+dialog --title "Update Confirmation" --yesno "Auto-run updates without asking for confirmation? (WARNING: this can create risks! please monitor which packages are being upgraded!)" 7 50
 CONFIRM_UPDATE=$([ $? -eq 0 ] && echo false || echo true)
 
 if command -v fastfetch &>/dev/null; then
@@ -175,7 +175,7 @@ dialog --msgbox "Configuration saved to $CONFIG_FILE" 5 50
 
 if [ "$PM" = "pacman" ]; then
     if pacman -Q discord &>/dev/null 2>&1 && [ -d "$HOME/.config/Vencord" ]; then
-        dialog --title "Discord" --yesno "Discord + Vencord detected.\nCreate auto-repatch hook? (recommended)" 6 50
+        dialog --title "Discord" --yesno "Discord + Vencord detected. Create auto-repatch hook? (recommended)" 6 50
         if [ $? -eq 0 ]; then
             cat > "$POST_HOOKS_DIR/discord.sh" << 'EOF'
 #!/bin/bash
@@ -187,7 +187,7 @@ EOF
     fi
 
     if pacman -Q nvidia &>/dev/null 2>&1; then
-        dialog --title "NVIDIA" --yesno "NVIDIA firmware detected.\nCreate initramfs rebuild hook?" 6 50
+        dialog --title "NVIDIA" --yesno "NVIDIA firmware detected. Create initramfs rebuild hook?" 6 50
         if [ $? -eq 0 ]; then
             cat > "$POST_HOOKS_DIR/nvidia.sh" << 'EOF'
 #!/bin/bash
@@ -199,7 +199,7 @@ EOF
     fi
 
     if pacman -Q vmware-workstation &>/dev/null 2>&1; then
-        dialog --title "VMware" --yesno "VMware detected.\nCreate module rebuild hook?" 6 50
+        dialog --title "VMware" --yesno "VMware detected. Create module rebuild hook?" 6 50
         if [ $? -eq 0 ]; then
             cat > "$POST_HOOKS_DIR/vmware.sh" << 'EOF'
 #!/bin/bash
