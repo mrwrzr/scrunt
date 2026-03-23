@@ -76,8 +76,8 @@ show list of available flags
 | `AUR_HELPER` | paru, yay, (empty) | AUR helper (arch-based) |
 | `FLATPAK` | true, false | update flatpak apps |
 | `SNAP` | true, false | update snap packages |
-|SAVE_PACKAGE_LIST | true,false | save list of upgraded packages |
-|CREATE_SNAPSHOT | true,false | create system snapshot before updates |
+| `SAVE_PACKAGE_LIST` | true,false | save list of upgraded packages |
+| `CREATE_SNAPSHOT` | true,false | create system snapshot before updates |
 | `CONFIRM_UPDATE` | true, false | if false, uses `--noconfirm`/`-y` |
 | `FASTFETCH` | true, false | show fastfetch after updates |
 
