@@ -138,15 +138,18 @@ if [ "$LOOK_MODE" = false ]; then
 
     case $PM in
         pacman)
-            sudo pacman -Sy --print-format="%n %v" 2>/dev/null | grep -v "^::" | while read pkg ver; do
-                [ -n "$pkg" ] && echo "  $pkg ($ver)"
+            sudo pacman -Sy >/dev/null 2>&1
+            pacman -Qu 2>/dev/null | while read pkg ver; do
+                echo "  $pkg"
             done
             if [ -n "$AUR_HELPER" ] && command -v "$AUR_HELPER" &>/dev/null; then
                 echo ""
                 echo "AUR updates:"
-                $AUR_HELPER -Syu --print 2>/dev/null | grep -E "^(upgrading|installing)" | awk '{print "  " $2}'
+                $AUR_HELPER -Qu 2>/dev/null | while read pkg ver; do
+                    echo "  $pkg"
+                done
             fi
-            if [ -z "$(sudo pacman -Sy --print-format='%n' 2>/dev/null | grep -v '^::' | head -1)" ] && [ -z "$($AUR_HELPER -Syu --print 2>/dev/null | grep -E '^(upgrading|installing)' | head -1)" ]; then
+            if [ -z "$(pacman -Qu 2>/dev/null)" ] && [ -z "$($AUR_HELPER -Qu 2>/dev/null 2>/dev/null)" ]; then
                 echo "  No updates found"
             fi
             ;;
