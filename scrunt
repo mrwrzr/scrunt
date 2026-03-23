@@ -1,0 +1,301 @@
+#!/bin/bash
+# SCRUNT - simple coordinated regular update nexus tool
+# mrwrzr 2026 (gplv3)
+# "I'm gonna scrunt"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/scrunt"
+CONFIG_FILE="$CONFIG_DIR/config"
+HOOKS_DIR="$CONFIG_DIR/hooks"
+PRE_HOOKS_DIR="$HOOKS_DIR/pre"
+POST_HOOKS_DIR="$HOOKS_DIR/post"
+
+# argument defaults:
+LOOK_MODE=false
+FORCE_TOGGLE=false
+EDIT_CONFIG=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --huh) LOOK_MODE=true; shift ;;
+        --tog) FORCE_TOGGLE=true; shift ;;
+        --config) EDIT_CONFIG=true; shift ;;
+        --help)
+            echo "scrunt - Simple Coordinated Regular Update Nexus Tool"
+            echo ""
+            echo "usage: scrunt [OPTIONS]"
+            echo ""
+            echo "options:"
+            echo "  --huh      show upgradable packages without taking action"
+            echo "  --tog      use opposite of your current confirmation setting"
+            echo "  --config   edit configuration file"
+            echo "  --help     show this help message"
+            exit 0
+            ;;
+        *) shift ;;
+    esac
+done
+
+if [ "$EDIT_CONFIG" = true ]; then
+    if [ -f "$CONFIG_FILE" ]; then
+        ${EDITOR:-nano} "$CONFIG_FILE"
+    else
+        echo "ERROR: No config found at $CONFIG_FILE"
+        echo "Run 'scrunt-wizard' to set up scrunt first"
+        exit 1
+    fi
+    exit 0
+fi
+
+# check if config exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: No configuration found at $CONFIG_FILE"
+    echo ""
+    if command -v dialog &>/dev/null; then
+        echo "Running setup wizard..."
+        scrunt-wizard
+        exit 0
+    else
+        echo "Please install 'dialog' first, then run 'scrunt-wizard' to set up scrunt"
+        echo ""
+        echo "  Debian/Ubuntu: sudo apt install dialog"
+        echo "  Fedora:        sudo dnf install dialog"
+        echo "  Arch:          sudo pacman -S dialog"
+        echo "  openSUSE:      sudo zypper install dialog"
+        exit 1
+    fi
+fi
+
+source "$CONFIG_FILE"
+
+if [ -z "$PM" ]; then
+    echo "ERROR: No package manager configured in $CONFIG_FILE"
+    echo "Try running scrunt-wizard"
+    exit 1
+fi
+
+if [ "$FORCE_TOGGLE" = true ]; then
+    if [ "$CONFIRM_UPDATE" = true ]; then
+        USE_APPROVE=false
+    else
+        USE_APPROVE=true
+    fi
+else
+    USE_APPROVE="$CONFIRM_UPDATE"
+fi
+
+if [ "$USE_APPROVE" = false ]; then
+    PACMAN_APPROVE="--noconfirm"
+    APT_APPROVE="-y"
+    DNF_APPROVE="-y"
+    YUM_APPROVE="-y"
+    ZYPPER_APPROVE="--non-interactive"
+    FLATPAK_APPROVE="-y"
+else
+    PACMAN_APPROVE=""
+    APT_APPROVE=""
+    DNF_APPROVE=""
+    YUM_APPROVE=""
+    ZYPPER_APPROVE=""
+    FLATPAK_APPROVE=""
+fi
+
+# keep sudo active (BETA)
+sudo -v 2>/dev/null || true
+
+if [ "$SAVE_PACKAGE_LIST" = true ] && [ "$LOOK_MODE" = false ]; then
+    echo "Saving package list..."
+    case $PM in
+        pacman)
+            pacman -Qqen > "$CONFIG_DIR/pkglist.txt" 2>/dev/null || true
+            ;;
+        apt)
+            apt list --installed 2>/dev/null | cut -d/ -f1 > "$CONFIG_DIR/pkglist.txt" || true
+            ;;
+        dnf|yum)
+            rpm -qa | sort > "$CONFIG_DIR/pkglist.txt" 2>/dev/null || true
+            ;;
+        zypper)
+            zypper se --installed-only 2>/dev/null | tail -n +5 | awk '{print $3}' > "$CONFIG_DIR/pkglist.txt" || true
+            ;;
+    esac
+    echo "Package list saved"
+fi
+
+if [ "$CREATE_SNAPSHOT" = true ] && [ "$LOOK_MODE" = false ]; then
+    if command -v timeshift &>/dev/null; then
+        echo "Creating timeshift snapshot..."
+        sudo timeshift --create --comments "Pre-update snapshot by scrunt" || echo "Timeshift snapshot failed"
+    elif command -v snapper &>/dev/null; then
+        echo "Creating snapper snapshot..."
+        sudo snapper create --description "Pre-update snapshot by scrunt" || echo "Snapper snapshot failed"
+    fi
+fi
+
+if [ "$LOOK_MODE" = false ]; then
+    echo ""
+    echo "The following packages will be updated:"
+    echo ""
+
+    case $PM in
+        pacman)
+            sudo pacman -Sy --print 2>&1 | grep -E "^(upgrading|installing|removing)" || echo "  No updates found"
+            if [ -n "$AUR_HELPER" ] && command -v "$AUR_HELPER" &>/dev/null; then
+                $AUR_HELPER -Syu --print 2>&1 | grep -E "^(upgrading|installing|removing)" || true
+            fi
+            ;;
+        apt)
+            sudo apt update >/dev/null 2>&1
+            apt list --upgradable 2>/dev/null || echo "  No updates found"
+            ;;
+        dnf|yum)
+            sudo $PM check-update 2>&1 | grep -E "^(upgrading|installing|removing)" || echo "  No updates found"
+            ;;
+        zypper)
+            sudo zypper list-updates 2>&1 | grep -v "loading repository" | grep -v "reading installed packages" | grep -v "^$" || echo "  No updates found"
+            ;;
+    esac
+
+    if [ "$FLATPAK" = true ] && command -v flatpak &>/dev/null; then
+        echo ""
+        echo "Flatpak updates:"
+        flatpak update --dry-run 2>&1 | grep -E "^\s+[0-9]+\." || echo "  No updates found"
+    fi
+
+    if [ "$SNAP" = true ] && command -v snap &>/dev/null; then
+        echo ""
+        echo "Snap updates:"
+        snap refresh --list 2>&1 | grep -v "all snaps up to date" || echo "  No updates found"
+    fi
+
+    echo ""
+    if [ "$USE_APPROVE" = false ]; then
+        echo "Auto-confirm is enabled - proceeding with updates in 3 seconds..."
+        sleep 3
+    else
+        read -p "Proceed with updates? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Update cancelled"
+            exit 0
+        fi
+    fi
+    echo ""
+fi
+
+# begin main script
+
+if [ -d "$PRE_HOOKS_DIR" ]; then
+    for hook in "$PRE_HOOKS_DIR"/*.sh; do
+        [ -f "$hook" ] || continue
+        echo "Running pre-update hook: $(basename "$hook")"
+        bash "$hook"
+    done
+fi
+
+case $PM in
+    pacman)
+        if [ "$LOOK_MODE" = true ]; then
+            echo "Checking for updates..."
+            sudo pacman -Sy --print 2>&1 || true
+            if [ -n "$AUR_HELPER" ] && command -v "$AUR_HELPER" &>/dev/null; then
+                echo "Checking AUR updates..."
+                $AUR_HELPER -Syu --print 2>&1 || true
+            fi
+        else
+            echo "Updating packages with $PM..."
+            sudo pacman -Syu $PACMAN_APPROVE 2>&1
+            if [ -n "$AUR_HELPER" ] && command -v "$AUR_HELPER" &>/dev/null; then
+                echo "Updating AUR packages with $AUR_HELPER..."
+                $AUR_HELPER -Syu $PACMAN_APPROVE 2>&1
+            fi
+        fi
+        ;;
+    apt)
+        if [ "$LOOK_MODE" = true ]; then
+            echo "Checking for updates..."
+            sudo apt update >/dev/null 2>&1
+            apt list --upgradable 2>/dev/null || echo "No updates available"
+        else
+            echo "Updating package lists..."
+            sudo apt update >/dev/null 2>&1
+            echo "Upgrading packages..."
+            sudo apt upgrade $APT_APPROVE 2>&1
+        fi
+        ;;
+    dnf)
+        if [ "$LOOK_MODE" = true ]; then
+            echo "Checking for updates..."
+            sudo dnf check-update 2>&1 || true
+        else
+            echo "Updating packages with dnf..."
+            sudo dnf upgrade $DNF_APPROVE 2>&1
+        fi
+        ;;
+    yum)
+        if [ "$LOOK_MODE" = true ]; then
+            echo "Checking for updates..."
+            sudo yum check-update 2>&1 || true
+        else
+            echo "Updating packages with yum..."
+            sudo yum update $YUM_APPROVE 2>&1
+        fi
+        ;;
+    zypper)
+        if [ "$LOOK_MODE" = true ]; then
+            echo "Checking for updates..."
+            sudo zypper refresh --dry-run 2>&1
+            sudo zypper list-updates 2>&1
+        else
+            echo "Refreshing repositories..."
+            sudo zypper refresh >/dev/null 2>&1
+            echo "Updating packages with zypper..."
+            sudo zypper update $ZYPPER_APPROVE 2>&1
+        fi
+        ;;
+    *)
+        echo "( !ERROR! ) package manager '$PM' is currently unsupported :("
+        exit 1
+        ;;
+esac
+
+if [ "$FLATPAK" = true ] && command -v flatpak &>/dev/null; then
+    if [ "$LOOK_MODE" = true ]; then
+        echo "Checking flatpak updates..."
+        flatpak update --dry-run 2>&1
+    else
+        echo "Updating flatpak applications..."
+        flatpak update $FLATPAK_APPROVE 2>&1
+    fi
+fi
+
+if [ "$SNAP" = true ] && command -v snap &>/dev/null; then
+    if [ "$LOOK_MODE" = true ]; then
+        echo "Checking snap updates..."
+        snap refresh --list 2>&1
+    else
+        echo "Updating snap packages..."
+        snap refresh 2>&1
+    fi
+fi
+
+if [ "$LOOK_MODE" = true ]; then
+    exit 0
+fi
+
+if [ -d "$POST_HOOKS_DIR" ]; then
+    for hook in "$POST_HOOKS_DIR"/*.sh; do
+        [ -f "$hook" ] || continue
+        echo "Running post-update hook: $(basename "$hook")"
+        bash "$hook"
+    done
+fi
+
+# end main script
+
+if [ "$FASTFETCH" = true ] && command -v fastfetch &>/dev/null; then
+    echo ""
+    fastfetch
+fi
+
+echo ""
+echo "scrunt complete"

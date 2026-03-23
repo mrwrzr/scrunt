@@ -1,0 +1,234 @@
+#!/bin/bash
+# scrunt-wizard - setup tool for scrunt
+# mrwrzr 2026 (gplv3)
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/scrunt"
+CONFIG_FILE="$CONFIG_DIR/config"
+HOOKS_DIR="$CONFIG_DIR/hooks"
+PRE_HOOKS_DIR="$HOOKS_DIR/pre"
+POST_HOOKS_DIR="$HOOKS_DIR/post"
+
+if ! command -v dialog &>/dev/null; then
+    echo "( !ERROR! ) 'dialog' is required for scrunt-wizard"
+    echo ""
+    echo "Please install dialog:"
+    echo "  Debian/Ubuntu: sudo apt install dialog"
+    echo "  Fedora:        sudo dnf install dialog"
+    echo "  Arch:          sudo pacman -S dialog"
+    echo "  openSUSE:      sudo zypper install dialog"
+    exit 1
+fi
+
+mkdir -p "$CONFIG_DIR" "$PRE_HOOKS_DIR" "$POST_HOOKS_DIR"
+
+create_hook() {
+    local type=$1
+    local title=$2
+    local target_dir=$3
+
+    dialog --title "$title" --inputbox "Package name to watch:" 8 40 2>/tmp/pkg_name
+    pkg=$(cat /tmp/pkg_name)
+    if [ -n "$pkg" ]; then
+        dialog --title "$title" --inputbox "Command to run when $pkg updates:" 10 60 2>/tmp/pkg_cmd
+        cmd=$(cat /tmp/pkg_cmd)
+        if [ -n "$cmd" ]; then
+            cat > "$target_dir/$pkg.sh" << EOF
+#!/bin/bash
+$cmd
+EOF
+            chmod +x "$target_dir/$pkg.sh"
+            dialog --msgbox "${type} hook created for $pkg" 6 30
+        fi
+    fi
+}
+
+list_hooks() {
+    local dir=$1
+    local suffix=$2
+    ls -1 "$dir" 2>/dev/null | sed 's/\.sh$//' | awk -v suf="$suffix" '{print $1 " (" suf ")"}'
+}
+
+if [ -f "$CONFIG_FILE" ]; then
+    dialog --title "scrunt" --menu "Valid config detected!" 12 50 4 \
+        1 "Edit config" \
+        2 "Manage hooks" \
+        3 "Run full setup" \
+        4 "Exit" 2>/tmp/scrunt_choice
+    choice=$(cat /tmp/scrunt_choice)
+    case $choice in
+        1) ${EDITOR:-nano} "$CONFIG_FILE"; clear; exit 0 ;;
+        2)
+            while true; do
+                pre_list=$(list_hooks "$PRE_HOOKS_DIR" "pre")
+                post_list=$(list_hooks "$POST_HOOKS_DIR" "post")
+                hook_list=$(echo -e "$pre_list\n$post_list" | grep -v '^$')
+                if [ -z "$hook_list" ]; then
+                    hook_list="none \"\""
+                fi
+                dialog --title "Manage Hooks" --menu "Current hooks:" 20 60 10 \
+                    $hook_list \
+                    "add_pre" "Add pre-update hook" \
+                    "add_post" "Add post-update hook" \
+                    "back" "Return" 2>/tmp/hook_action
+                action=$(cat /tmp/hook_action)
+                case $action in
+                    add_pre) create_hook "Pre-update" "New Pre-Update Hook" "$PRE_HOOKS_DIR" ;;
+                    add_post) create_hook "Post-update" "New Post-Update Hook" "$POST_HOOKS_DIR" ;;
+                    back) break ;;
+                    none) break ;;
+                    *)
+                        if [[ "$action" == *"(pre)" ]]; then
+                            pkg_name=$(echo "$action" | sed 's/ (pre)//')
+                            hook_path="$PRE_HOOKS_DIR/$pkg_name.sh"
+                        elif [[ "$action" == *"(post)" ]]; then
+                            pkg_name=$(echo "$action" | sed 's/ (post)//')
+                            hook_path="$POST_HOOKS_DIR/$pkg_name.sh"
+                        fi
+                        if [ -f "$hook_path" ]; then
+                            dialog --title "Remove Hook" --yesno "Remove hook for $pkg_name?" 6 40
+                            if [ $? -eq 0 ]; then
+                                rm -f "$hook_path"
+                                dialog --msgbox "Hook removed" 5 30
+                            fi
+                        fi
+                        ;;
+                esac
+            done
+            clear
+            exit 0 ;;
+        3) rm -f "$CONFIG_FILE" ;;
+        4) clear; exit 0 ;;
+    esac
+fi
+
+dialog --title "scrunt setup" --msgbox "Welcome to scrunt setup\n\nThis will configure your update routine with pre-update and post-update hooks." 8 50
+
+if command -v pacman &>/dev/null; then
+    PM="pacman"
+    if command -v paru &>/dev/null; then
+        AUR="paru"
+    elif command -v yay &>/dev/null; then
+        AUR="yay"
+    else
+        AUR=""
+    fi
+elif command -v apt &>/dev/null; then
+    PM="apt"
+    AUR=""
+elif command -v dnf &>/dev/null; then
+    PM="dnf"
+    AUR=""
+elif command -v yum &>/dev/null; then
+    PM="yum"
+    AUR=""
+elif command -v zypper &>/dev/null; then
+    PM="zypper"
+    AUR=""
+else
+    dialog --title "Package Manager" --inputbox "Could not detect package manager.\nEnter manually (pacman/apt/dnf/yum/zypper):" 8 50 2>/tmp/pm
+    PM=$(cat /tmp/pm)
+    AUR=""
+fi
+
+if command -v flatpak &>/dev/null; then
+    dialog --title "Flatpak" --yesno "Update flatpak applications?" 5 40
+    FLATPAK=$([ $? -eq 0 ] && echo true || echo false)
+else
+    FLATPAK=false
+fi
+
+if command -v snap &>/dev/null; then
+    dialog --title "Snap" --yesno "Update snap packages?" 5 40
+    SNAP=$([ $? -eq 0 ] && echo true || echo false)
+else
+    SNAP=false
+fi
+
+dialog --title "Package List Backup" --yesno "Save list of installed packages before updating?\n\n(recommended)" 7 50
+SAVE_PACKAGE_LIST=$([ $? -eq 0 ] && echo true || echo false)
+
+dialog --title "System Snapshots" --yesno "Create system snapshot before updating?\n\n(requires timeshift or snapper)" 7 50
+CREATE_SNAPSHOT=$([ $? -eq 0 ] && echo true || echo false)
+
+dialog --title "Update Confirmation" --yesno "Auto-run updates without asking for confirmation?\n\n(WARNING: this can create risks! please monitor which packages are being upgraded!)" 7 50
+CONFIRM_UPDATE=$([ $? -eq 0 ] && echo false || echo true)
+
+if command -v fastfetch &>/dev/null; then
+    dialog --title "Fastfetch" --yesno "Display fastfetch after updates?" 5 40
+    FASTFETCH=$([ $? -eq 0 ] && echo true || echo false)
+else
+    FASTFETCH=false
+fi
+
+cat > "$CONFIG_FILE" << EOF
+PM="$PM"
+AUR_HELPER="$AUR"
+FLATPAK=$FLATPAK
+SNAP=$SNAP
+SAVE_PACKAGE_LIST=$SAVE_PACKAGE_LIST
+CREATE_SNAPSHOT=$CREATE_SNAPSHOT
+CONFIRM_UPDATE=$CONFIRM_UPDATE
+FASTFETCH=$FASTFETCH
+EOF
+
+dialog --msgbox "Configuration saved to $CONFIG_FILE" 5 50
+
+if [ "$PM" = "pacman" ]; then
+    if pacman -Q discord &>/dev/null 2>&1 && [ -d "$HOME/.config/Vencord" ]; then
+        dialog --title "Discord" --yesno "Discord + Vencord detected.\nCreate auto-repatch hook? (recommended)" 6 50
+        if [ $? -eq 0 ]; then
+            cat > "$POST_HOOKS_DIR/discord.sh" << 'EOF'
+#!/bin/bash
+curl -sS https://vencord.dev/install.sh | sh
+EOF
+            chmod +x "$POST_HOOKS_DIR/discord.sh"
+            dialog --msgbox "Created post-update hook: discord" 5 30
+        fi
+    fi
+
+    if pacman -Q nvidia &>/dev/null 2>&1; then
+        dialog --title "NVIDIA" --yesno "NVIDIA firmware detected.\nCreate initramfs rebuild hook?" 6 50
+        if [ $? -eq 0 ]; then
+            cat > "$POST_HOOKS_DIR/nvidia.sh" << 'EOF'
+#!/bin/bash
+sudo mkinitcpio -P
+EOF
+            chmod +x "$POST_HOOKS_DIR/nvidia.sh"
+            dialog --msgbox "Created post-update hook: nvidia" 5 30
+        fi
+    fi
+
+    if pacman -Q vmware-workstation &>/dev/null 2>&1; then
+        dialog --title "VMware" --yesno "VMware detected.\nCreate module rebuild hook?" 6 50
+        if [ $? -eq 0 ]; then
+            cat > "$POST_HOOKS_DIR/vmware.sh" << 'EOF'
+#!/bin/bash
+sudo vmware-modconfig --console --install-all
+EOF
+            chmod +x "$POST_HOOKS_DIR/vmware.sh"
+            dialog --msgbox "Created post-update hook: vmware" 5 30
+        fi
+    fi
+fi
+
+dialog --title "Custom Hook" --yesno "Add a custom package hook? (WARNING: please only add hooks you trust!)" 5 40
+if [ $? -eq 0 ]; then
+    dialog --title "Hook Type" --menu "When should this hook run?" 12 40 2 \
+        1 "Before updates (pre-update)" \
+        2 "After updates (post-update)" 2>/tmp/hook_type
+    hook_type=$(cat /tmp/hook_type)
+
+    if [ "$hook_type" = "1" ]; then
+        create_hook "Pre-update" "New Pre-Update Hook" "$PRE_HOOKS_DIR"
+    else
+        create_hook "Post-update" "New Post-Update Hook" "$POST_HOOKS_DIR"
+    fi
+fi
+
+clear
+echo "setup complete!"
+echo ""
+echo "Run 'scrunt' to update and run hooks"
+echo "Run 'scrunt --huh' to preview updates without running"
+echo "Run 'scrunt --tog' to toggle confirmation behavior"
+echo "Run 'scrunt --config' to edit config"
