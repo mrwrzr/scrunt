@@ -179,7 +179,7 @@ if [ "$PM" = "pacman" ]; then
         if [ $? -eq 0 ]; then
             cat > "$POST_HOOKS_DIR/discord.sh" << 'EOF'
 #!/bin/bash
-curl -sS https://vencord.dev/install.sh | sh
+curl -sS https://vencord.dev/install.sh | sh -s -- --install --location /opt/discord
 EOF
             chmod +x "$POST_HOOKS_DIR/discord.sh"
             dialog --msgbox "Created post-update hook: discord" 5 30
