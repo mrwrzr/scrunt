@@ -15,9 +15,9 @@ an easy way to automate your update routine.
 # install scrunt
 
 ### dependencies
-required:
 - `dialog` (required for setup)
 - `bash`, `sudo`, and a package manager
+
 optional:
 - `timeshift` or `snapper` for pre-update snapshots
 - `fastfetch` to display when done
