@@ -138,33 +138,75 @@ if [ "$LOOK_MODE" = false ]; then
 
     case $PM in
         pacman)
-            sudo pacman -Sy --print 2>&1 | grep -E "^(upgrading|installing|removing)" || echo "  No updates found"
+            sudo pacman -Sy --print-format="%n %v" 2>/dev/null | grep -v "^::" | while read pkg ver; do
+                [ -n "$pkg" ] && echo "  $pkg ($ver)"
+            done
             if [ -n "$AUR_HELPER" ] && command -v "$AUR_HELPER" &>/dev/null; then
-                $AUR_HELPER -Syu --print 2>&1 | grep -E "^(upgrading|installing|removing)" || true
+                echo ""
+                echo "AUR updates:"
+                $AUR_HELPER -Syu --print 2>/dev/null | grep -E "^(upgrading|installing)" | awk '{print "  " $2}'
+            fi
+            if [ -z "$(sudo pacman -Sy --print-format='%n' 2>/dev/null | grep -v '^::' | head -1)" ] && [ -z "$($AUR_HELPER -Syu --print 2>/dev/null | grep -E '^(upgrading|installing)' | head -1)" ]; then
+                echo "  No updates found"
             fi
             ;;
         apt)
             sudo apt update >/dev/null 2>&1
-            apt list --upgradable 2>/dev/null || echo "  No updates found"
+            updates=$(apt list --upgradable 2>/dev/null | tail -n +2 | cut -d/ -f1)
+            if [ -n "$updates" ]; then
+                echo "$updates" | while read pkg; do
+                    echo "  $pkg"
+                done
+            else
+                echo "  No updates found"
+            fi
             ;;
         dnf|yum)
-            sudo $PM check-update 2>&1 | grep -E "^(upgrading|installing|removing)" || echo "  No updates found"
+            updates=$(sudo $PM check-update 2>/dev/null | grep -v "^$" | grep -v "^Last" | grep -v "^ " | awk '{print $1}')
+            if [ -n "$updates" ]; then
+                echo "$updates" | while read pkg; do
+                    echo "  $pkg"
+                done
+            else
+                echo "  No updates found"
+            fi
             ;;
         zypper)
-            sudo zypper list-updates 2>&1 | grep -v "loading repository" | grep -v "reading installed packages" | grep -v "^$" || echo "  No updates found"
+            updates=$(sudo zypper list-updates 2>/dev/null | tail -n +5 | awk '{print $3}')
+            if [ -n "$updates" ]; then
+                echo "$updates" | while read pkg; do
+                    echo "  $pkg"
+                done
+            else
+                echo "  No updates found"
+            fi
             ;;
     esac
 
     if [ "$FLATPAK" = true ] && command -v flatpak &>/dev/null; then
         echo ""
         echo "Flatpak updates:"
-        flatpak update --dry-run 2>&1 | grep -E "^\s+[0-9]+\." || echo "  No updates found"
+        updates=$(flatpak remote-ls --updates 2>/dev/null | tail -n +2 | awk '{print $1}')
+        if [ -n "$updates" ]; then
+            echo "$updates" | while read app; do
+                echo "  $app"
+            done
+        else
+            echo "  No updates found"
+        fi
     fi
 
     if [ "$SNAP" = true ] && command -v snap &>/dev/null; then
         echo ""
         echo "Snap updates:"
-        snap refresh --list 2>&1 | grep -v "all snaps up to date" || echo "  No updates found"
+        updates=$(snap refresh --list 2>/dev/null | tail -n +2 | awk '{print $1}')
+        if [ -n "$updates" ]; then
+            echo "$updates" | while read pkg; do
+                echo "  $pkg"
+            done
+        else
+            echo "  No updates found"
+        fi
     fi
 
     echo ""
@@ -182,8 +224,6 @@ if [ "$LOOK_MODE" = false ]; then
     echo ""
 fi
 
-# begin main script
-
 if [ -d "$PRE_HOOKS_DIR" ]; then
     for hook in "$PRE_HOOKS_DIR"/*.sh; do
         [ -f "$hook" ] || continue
@@ -196,10 +236,10 @@ case $PM in
     pacman)
         if [ "$LOOK_MODE" = true ]; then
             echo "Checking for updates..."
-            sudo pacman -Sy --print 2>&1 || true
+            sudo pacman -Sy --print-format="%n %v" 2>&1 | grep -v "^::" || true
             if [ -n "$AUR_HELPER" ] && command -v "$AUR_HELPER" &>/dev/null; then
                 echo "Checking AUR updates..."
-                $AUR_HELPER -Syu --print 2>&1 || true
+                $AUR_HELPER -Syu --print 2>&1 | grep -E "^(upgrading|installing)" || true
             fi
         else
             echo "Updating packages with $PM..."
@@ -243,7 +283,6 @@ case $PM in
     zypper)
         if [ "$LOOK_MODE" = true ]; then
             echo "Checking for updates..."
-            sudo zypper refresh --dry-run 2>&1
             sudo zypper list-updates 2>&1
         else
             echo "Refreshing repositories..."
@@ -261,7 +300,7 @@ esac
 if [ "$FLATPAK" = true ] && command -v flatpak &>/dev/null; then
     if [ "$LOOK_MODE" = true ]; then
         echo "Checking flatpak updates..."
-        flatpak update --dry-run 2>&1
+        flatpak remote-ls --updates 2>/dev/null || echo "No updates available"
     else
         echo "Updating flatpak applications..."
         flatpak update $FLATPAK_APPROVE 2>&1
