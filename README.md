@@ -28,7 +28,7 @@ optional:
 git clone https://github.com/mrwrzr/scrunt
 cd scrunt
 sudo cp scrunt scrunt-wizard /usr/local/bin/
-chmod +x scrunt scrunt-wizard
+sudo chmod +x /usr/local/bin/scrunt /usr/local/bin/scrunt-wizard
 scrunt
 ```
 
