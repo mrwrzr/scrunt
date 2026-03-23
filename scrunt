@@ -236,10 +236,10 @@ case $PM in
     pacman)
         if [ "$LOOK_MODE" = true ]; then
             echo "Checking for updates..."
-            sudo pacman -Sy --print-format="%n %v" 2>&1 | grep -v "^::" || true
+            sudo pacman -Syu --print-format="%n %v" 2>&1 | grep -v "downloading" | grep -v "^::" || echo "  No updates found"
             if [ -n "$AUR_HELPER" ] && command -v "$AUR_HELPER" &>/dev/null; then
                 echo "Checking AUR updates..."
-                $AUR_HELPER -Syu --print 2>&1 | grep -E "^(upgrading|installing)" || true
+                $AUR_HELPER -Syu --print 2>&1 | grep -E "^(upgrading|installing)" || echo "  No AUR updates found"
             fi
         else
             echo "Updating packages with $PM..."
